@@ -15,28 +15,22 @@ const port = process.env.PORT || 5050;
 
 /* ---------- MIDDLEWARE ---------- */
 app.use(cors({
-    origin: [
-        "http://localhost:5173",
-        "http://localhost:5174",
-        "https://cerulean-paprenjak-3a54da.netlify.app",
-        "https://69515536f2ba811335e82359--cerulean-paprenjak-3a54da.netlify.app"
-    ],
-    methods: ["GET", "POST", "PUT", "DELETE", "OPTIONS"],
-    allowedHeaders: ["Content-Type", "Authorization"],
-    credentials: true
+  origin: [
+    "http://localhost:5173",
+    "http://localhost:5174",
+    "https://cerulean-paprenjak-3a54da.netlify.app",
+    "https://69515536f2ba811335e82359--cerulean-paprenjak-3a54da.netlify.app"
+  ],
+  methods: ["GET", "POST", "OPTIONS"],
+  allowedHeaders: ["Content-Type"],
 }));
+
 app.use(express.json());
 
-/* ---------- DATABASE CONNECTION ---------- */
-mongoose.connect(process.env.MONGO_URI)
-  .then(() => console.log("✅ MongoDB Atlas connected"))
-  .catch(err => {
-    console.error("❌ MongoDB error:", err);
-    process.exit(1);
-  });
-
 /* ---------- HEALTH CHECK ---------- */
-app.get("/health", (_, res) => res.json({ ok: true }));
+app.get("/health", (_, res) => {
+  res.json({ ok: true });
+});
 
 /* ---------- VERIFY CLAIM ---------- */
 app.post("/api/verify", async (req, res) => {
@@ -47,14 +41,14 @@ app.post("/api/verify", async (req, res) => {
       return res.status(400).json({ error: "claim is required" });
     }
 
-    // 1️⃣ Wikipedia
+    /* 1️⃣ Wikipedia */
     let wiki = null;
     try {
       const title = await searchWikipediaTopTitle(claim);
       if (title) wiki = await getWikipediaSummaryByTitle(title);
     } catch {}
 
-    // 2️⃣ GNews
+    /* 2️⃣ GNews */
     let gnewsLinks = [];
     try {
       gnewsLinks = await searchGNews(claim, {
@@ -64,7 +58,7 @@ app.post("/api/verify", async (req, res) => {
       });
     } catch {}
 
-    // 3️⃣ LLM
+    /* 3️⃣ LLM */
     let modelResult = {
       verdict: "Uncertain",
       confidence: 50,
@@ -83,13 +77,13 @@ app.post("/api/verify", async (req, res) => {
       } catch {}
     }
 
-    // 4️⃣ Merge Sources
+    /* 4️⃣ Merge Sources */
     const srcSet = new Set();
     modelResult.sources?.forEach(u => u && srcSet.add(u));
     if (wiki?.url) srcSet.add(wiki.url);
     gnewsLinks.forEach(a => a?.url && srcSet.add(a.url));
 
-    // 5️⃣ Save to DB ⭐
+    /* 5️⃣ Save History */
     await History.create({
       claim,
       verdict: modelResult.verdict,
@@ -100,7 +94,7 @@ app.post("/api/verify", async (req, res) => {
       gnews: gnewsLinks || []
     });
 
-    // 6️⃣ Response
+    /* 6️⃣ Response */
     res.json({
       verdict: modelResult.verdict,
       confidence: modelResult.confidence,
@@ -111,7 +105,7 @@ app.post("/api/verify", async (req, res) => {
     });
 
   } catch (err) {
-    console.error("❌ /api/verify:", err);
+    console.error("❌ /api/verify error:", err);
     res.status(500).json({ error: "Server error" });
   }
 });
@@ -131,7 +125,15 @@ app.get("/api/history/:id", async (req, res) => {
   res.json(item);
 });
 
-/* ---------- START SERVER ---------- */
-app.listen(port, "0.0.0.0", () => {
-  console.log(`🚀 Server running on port ${port}`);
-});
+/* ---------- CONNECT DB & START SERVER ---------- */
+mongoose
+  .connect(process.env.MONGODB_URI)
+  .then(() => {
+    console.log("✅ MongoDB Atlas connected");
+    app.listen(port, "0.0.0.0", () => {
+      console.log(`🚀 Server running on port ${port}`);
+    });
+  })
+  .catch((err) => {
+    console.error("❌ MongoDB connection error:", err);
+  });
