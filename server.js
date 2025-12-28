@@ -14,7 +14,17 @@ const app = express();
 const port = process.env.PORT || 5050;
 
 /* ---------- MIDDLEWARE ---------- */
-app.use(cors());
+app.use(cors({
+    origin: [
+        "http://localhost:5173",
+        "http://localhost:5174",
+        "https://cerulean-paprenjak-3a54da.netlify.app",
+        "https://69515536f2ba811335e82359--cerulean-paprenjak-3a54da.netlify.app"
+    ],
+    methods: ["GET", "POST", "PUT", "DELETE", "OPTIONS"],
+    allowedHeaders: ["Content-Type", "Authorization"],
+    credentials: true
+}));
 app.use(express.json());
 
 /* ---------- DATABASE CONNECTION ---------- */
