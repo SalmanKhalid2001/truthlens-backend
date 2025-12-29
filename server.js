@@ -14,16 +14,24 @@ const app = express();
 const port = process.env.PORT || 5050;
 
 /* ---------- MIDDLEWARE ---------- */
+const allowedOrigins = [
+  "http://localhost:5173",
+  "http://localhost:5174",
+  "http://localhost:3000",
+  "https://lenstruth.netlify.app",
+  "https://cerulean-paprenjak-3a54da.netlify.app",
+  "https://69515536f2ba811335e82359--cerulean-paprenjak-3a54da.netlify.app"
+];
+
 app.use(cors({
-  origin: [
-    "http://localhost:5173",
-    "http://localhost:5174",
-    "https://cerulean-paprenjak-3a54da.netlify.app",
-    "https://69515536f2ba811335e82359--cerulean-paprenjak-3a54da.netlify.app"
-  ],
-  methods: ["GET", "POST", "OPTIONS"],
-  allowedHeaders: ["Content-Type"],
+  origin: allowedOrigins,
+  methods: ["GET", "POST", "PUT", "DELETE", "OPTIONS"],
+  allowedHeaders: ["Content-Type", "Authorization"],
+  credentials: true
 }));
+
+// Handle preflight requests
+app.options("*", cors());
 
 app.use(express.json());
 
@@ -46,7 +54,9 @@ app.post("/api/verify", async (req, res) => {
     try {
       const title = await searchWikipediaTopTitle(claim);
       if (title) wiki = await getWikipediaSummaryByTitle(title);
-    } catch {}
+    } catch (wikiErr) {
+      console.log("Wikipedia fetch failed:", wikiErr.message);
+    }
 
     /* 2️⃣ GNews */
     let gnewsLinks = [];
@@ -56,7 +66,9 @@ app.post("/api/verify", async (req, res) => {
         lang: process.env.GNEWS_LANG || "en",
         max: Number(process.env.GNEWS_MAX || 5),
       });
-    } catch {}
+    } catch (newsErr) {
+      console.log("GNews fetch failed:", newsErr.message);
+    }
 
     /* 3️⃣ LLM */
     let modelResult = {
@@ -74,7 +86,9 @@ app.post("/api/verify", async (req, res) => {
           news: gnewsLinks,
           env: process.env
         });
-      } catch {}
+      } catch (llmErr) {
+        console.log("LLM call failed:", llmErr.message);
+      }
     }
 
     /* 4️⃣ Merge Sources */
@@ -84,15 +98,19 @@ app.post("/api/verify", async (req, res) => {
     gnewsLinks.forEach(a => a?.url && srcSet.add(a.url));
 
     /* 5️⃣ Save History */
-    await History.create({
-      claim,
-      verdict: modelResult.verdict,
-      confidence: modelResult.confidence,
-      summary: modelResult.summary,
-      sources: [...srcSet],
-      wikipedia: wiki || null,
-      gnews: gnewsLinks || []
-    });
+    try {
+      await History.create({
+        claim,
+        verdict: modelResult.verdict,
+        confidence: modelResult.confidence,
+        summary: modelResult.summary,
+        sources: [...srcSet],
+        wikipedia: wiki || null,
+        gnews: gnewsLinks || []
+      });
+    } catch (dbErr) {
+      console.log("Failed to save history:", dbErr.message);
+    }
 
     /* 6️⃣ Response */
     res.json({
@@ -111,18 +129,28 @@ app.post("/api/verify", async (req, res) => {
 });
 
 /* ---------- HISTORY APIs ---------- */
-app.get("/api/history", async (_, res) => {
-  const history = await History.find({}, { claim: 1, createdAt: 1 })
-    .sort({ createdAt: -1 })
-    .limit(20);
+app.get("/api/history", async (req, res) => {
+  try {
+    const history = await History.find({}, { claim: 1, createdAt: 1 })
+      .sort({ createdAt: -1 })
+      .limit(20);
 
-  res.json(history);
+    res.json(history);
+  } catch (err) {
+    console.error("❌ /api/history error:", err);
+    res.status(500).json({ error: "Failed to fetch history" });
+  }
 });
 
 app.get("/api/history/:id", async (req, res) => {
-  const item = await History.findById(req.params.id);
-  if (!item) return res.status(404).json({ error: "Not found" });
-  res.json(item);
+  try {
+    const item = await History.findById(req.params.id);
+    if (!item) return res.status(404).json({ error: "Not found" });
+    res.json(item);
+  } catch (err) {
+    console.error("❌ /api/history/:id error:", err);
+    res.status(500).json({ error: "Failed to fetch history item" });
+  }
 });
 
 /* ---------- CONNECT DB & START SERVER ---------- */
@@ -136,4 +164,8 @@ mongoose
   })
   .catch((err) => {
     console.error("❌ MongoDB connection error:", err);
+    // Start server anyway (optional - for testing without DB)
+    app.listen(port, "0.0.0.0", () => {
+      console.log(`🚀 Server running on port ${port} (without DB)`);
+    });
   });
